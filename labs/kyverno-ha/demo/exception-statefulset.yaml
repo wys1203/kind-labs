@@ -1,0 +1,40 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: zone-spread-exempt-demo
+  namespace: kyverno-ha-demo
+  labels:
+    app: zone-spread-exempt-demo
+    ha-zone-spread: "enabled"
+    ha-zone-spread-exempt: "true"
+spec:
+  serviceName: zone-spread-exempt-demo
+  replicas: 3
+  selector:
+    matchLabels:
+      app: zone-spread-exempt-demo
+      ha-zone-spread: "enabled"
+      ha-zone-spread-exempt: "true"
+  template:
+    metadata:
+      labels:
+        app: zone-spread-exempt-demo
+        ha-zone-spread: "enabled"
+        ha-zone-spread-exempt: "true"
+    spec:
+      containers:
+        - name: pause
+          image: registry.k8s.io/pause:3.9
+          volumeMounts:
+            - name: data
+              mountPath: /data
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes:
+          - ReadWriteOnce
+        storageClassName: block-ssd
+        resources:
+          requests:
+            storage: 1Gi

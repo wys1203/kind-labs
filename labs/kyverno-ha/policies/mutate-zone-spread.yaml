@@ -1,0 +1,58 @@
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: add-zone-spread-for-ha
+  annotations:
+    policies.kyverno.io/title: Add zone spread constraints
+    policies.kyverno.io/category: Sample
+    policies.kyverno.io/subject: StatefulSet, Pod
+    policies.kyverno.io/description: >-
+      Inject topology spread constraints into selected StatefulSets which use
+      volumeClaimTemplates on StorageClass block-ssd so replica Pods are balanced
+      across nodes labeled with topology.kubernetes.io/zone=dc1,
+      topology.kubernetes.io/zone=dc2, and topology.kubernetes.io/zone=dc3.
+spec:
+  background: false
+  rules:
+    - name: add-zone-topology-spread
+      match:
+        any:
+          - resources:
+              kinds:
+                - StatefulSet
+              selector:
+                matchLabels:
+                  ha-zone-spread: "enabled"
+      exclude:
+        any:
+          - resources:
+              selector:
+                matchLabels:
+                  ha-zone-spread-exempt: "true"
+      preconditions:
+        all:
+          - key: "{{ request.object.spec.replicas || `1` }}"
+            operator: GreaterThanOrEquals
+            value: 2
+          - key: "{{ request.object.spec.volumeClaimTemplates[?spec.storageClassName == 'block-ssd'] | length(@) }}"
+            operator: GreaterThanOrEquals
+            value: 1
+          - key: "{{ request.object.spec.template.spec.topologySpreadConstraints || `[]` | length(@) }}"
+            operator: Equals
+            value: 0
+      mutate:
+        patchStrategicMerge:
+          spec:
+            template:
+              metadata:
+                labels:
+                  +(ha-zone-spread): "enabled"
+              spec:
+                +(topologySpreadConstraints):
+                  - maxSkew: 1
+                    topologyKey: topology.kubernetes.io/zone
+                    whenUnsatisfiable: DoNotSchedule
+                    minDomains: 3
+                    labelSelector:
+                      matchLabels:
+                        ha-zone-spread: "enabled"
