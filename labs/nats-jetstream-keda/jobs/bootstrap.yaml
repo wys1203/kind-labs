@@ -1,0 +1,34 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: nats-jetstream-bootstrap
+  namespace: nats-jetstream-keda
+spec:
+  backoffLimit: 1
+  template:
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: bootstrap
+          image: natsio/nats-box:latest
+          command:
+            - /bin/sh
+            - -ec
+            - |
+              until nats --server "$NATS_URL" --user "$NATS_USER" --password "$NATS_PASSWORD" stream ls >/dev/null 2>&1; do
+                echo "waiting for nats"
+                sleep 2
+              done
+
+              if ! nats --server "$NATS_URL" --user "$NATS_USER" --password "$NATS_PASSWORD" stream info ORDERS >/dev/null 2>&1; then
+                nats --server "$NATS_URL" --user "$NATS_USER" --password "$NATS_PASSWORD" \
+                  stream add ORDERS --subjects orders.created --storage file --retention limits --defaults
+              fi
+
+              if ! nats --server "$NATS_URL" --user "$NATS_USER" --password "$NATS_PASSWORD" consumer info ORDERS orders-worker >/dev/null 2>&1; then
+                nats --server "$NATS_URL" --user "$NATS_USER" --password "$NATS_PASSWORD" \
+                  consumer add ORDERS orders-worker --pull --filter orders.created --ack explicit --defaults
+              fi
+          envFrom:
+            - secretRef:
+                name: nats-client-credentials

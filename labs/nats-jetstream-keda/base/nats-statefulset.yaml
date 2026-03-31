@@ -1,0 +1,46 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: nats
+  namespace: nats-jetstream-keda
+spec:
+  serviceName: nats
+  replicas: 1
+  selector:
+    matchLabels:
+      app: nats
+  template:
+    metadata:
+      labels:
+        app: nats
+    spec:
+      containers:
+        - name: nats
+          image: nats:2.10-alpine
+          args:
+            - --config
+            - /etc/nats-config/nats.conf
+          ports:
+            - containerPort: 4222
+              name: client
+            - containerPort: 8222
+              name: monitor
+          readinessProbe:
+            tcpSocket:
+              port: 4222
+            periodSeconds: 5
+          livenessProbe:
+            tcpSocket:
+              port: 4222
+            periodSeconds: 10
+          volumeMounts:
+            - name: config
+              mountPath: /etc/nats-config
+            - name: data
+              mountPath: /data/jetstream
+      volumes:
+        - name: config
+          configMap:
+            name: nats-config
+        - name: data
+          emptyDir: {}

@@ -5,13 +5,20 @@ KYVERNO_NAMESPACE ?= kyverno
 KYVERNO_RELEASE ?= kyverno
 KYVERNO_CHART_VERSION ?= 3.2.8
 KYVERNO_VALUES ?= labs/kyverno-ha/helm/values.yaml
+KEDA_NAMESPACE ?= keda
+KEDA_RELEASE ?= keda
+KEDA_CHART_VERSION ?= 2.12.0
+NATS_KEDA_BASE_DIR ?= labs/nats-jetstream-keda/base
 
 .PHONY: help install-kind create delete recreate status sandbox-apply sandbox-delete \
 	kyverno-install kyverno-uninstall kyverno-policy-apply kyverno-policy-delete \
 	kyverno-demo-apply kyverno-demo-delete kyverno-demo-status kyverno-demo-exception \
 	kyverno-demo-scale \
 	kyverno-storageclass-apply kyverno-storageclass-delete kyverno-preflight \
-	kyverno-verify kyverno-up kyverno-down kyverno-reset kyverno-ready
+	kyverno-verify kyverno-up kyverno-down kyverno-reset kyverno-ready \
+	keda-install keda-uninstall keda-ready \
+	nats-keda-preflight nats-keda-apply nats-keda-bootstrap nats-keda-publish \
+	nats-keda-status nats-keda-verify nats-keda-delete nats-keda-up nats-keda-down
 
 help:
 	@printf '%s\n' \
@@ -29,7 +36,13 @@ help:
 		'make kyverno-demo-scale Deploy a 6-replica demo app' \
 		'make kyverno-ready Wait for Kyverno CRDs and controllers' \
 		'make kyverno-down Remove demo, policy, Kyverno, and lab StorageClass' \
-		'make kyverno-reset Rebuild the full Kyverno HA lab from scratch'
+		'make kyverno-reset Rebuild the full Kyverno HA lab from scratch' \
+		'make keda-install Install a KEDA release compatible with Kubernetes 1.26' \
+		'make nats-keda-up Install KEDA, apply the NATS JetStream lab, and bootstrap stream state' \
+		'make nats-keda-publish Create a publisher job that seeds JetStream backlog' \
+		'make nats-keda-status Show NATS, worker, and scaler status' \
+		'make nats-keda-verify Run the NATS/KEDA lab verification script' \
+		'make nats-keda-down Remove the NATS JetStream lab and KEDA'
 
 install-kind:
 	./scripts/install-kind.sh
@@ -132,3 +145,77 @@ kyverno-up: kyverno-storageclass-apply kyverno-preflight kyverno-install kyverno
 kyverno-down: kyverno-demo-delete kyverno-policy-delete kyverno-uninstall kyverno-storageclass-delete
 
 kyverno-reset: kyverno-down kyverno-up
+
+keda-install:
+	helm repo add kedacore https://kedacore.github.io/charts
+	helm repo update
+	helm upgrade --install $(KEDA_RELEASE) kedacore/keda \
+		--namespace $(KEDA_NAMESPACE) \
+		--create-namespace \
+		--version $(KEDA_CHART_VERSION)
+	$(MAKE) keda-ready
+
+keda-ready:
+	kubectl wait --for=condition=available deployment/$(KEDA_RELEASE)-operator -n $(KEDA_NAMESPACE) --timeout=180s
+	@metrics_deployment=$$( \
+		for name in $(KEDA_RELEASE)-operator-metrics-apiserver $(KEDA_RELEASE)-metrics-apiserver; do \
+			if kubectl get deployment/$$name -n $(KEDA_NAMESPACE) >/dev/null 2>&1; then \
+				echo $$name; \
+				break; \
+			fi; \
+		done \
+	); \
+	if [ -z "$$metrics_deployment" ]; then \
+		echo "Unable to find a KEDA metrics apiserver deployment in namespace $(KEDA_NAMESPACE)" >&2; \
+		exit 1; \
+	fi; \
+	kubectl wait --for=condition=available deployment/$$metrics_deployment -n $(KEDA_NAMESPACE) --timeout=180s
+	@webhook_deployment=$$( \
+		for name in $(KEDA_RELEASE)-admission-webhooks $(KEDA_RELEASE)-operator-webhooks; do \
+			if kubectl get deployment/$$name -n $(KEDA_NAMESPACE) >/dev/null 2>&1; then \
+				echo $$name; \
+				break; \
+			fi; \
+		done \
+	); \
+	if [ -z "$$webhook_deployment" ]; then \
+		echo "Unable to find a KEDA webhook deployment in namespace $(KEDA_NAMESPACE)" >&2; \
+		exit 1; \
+	fi; \
+	kubectl wait --for=condition=available deployment/$$webhook_deployment -n $(KEDA_NAMESPACE) --timeout=180s
+
+keda-uninstall:
+	helm uninstall $(KEDA_RELEASE) -n $(KEDA_NAMESPACE) || true
+	kubectl delete namespace $(KEDA_NAMESPACE) --ignore-not-found=true
+
+nats-keda-preflight:
+	./labs/nats-jetstream-keda/tests/preflight.sh
+
+nats-keda-apply:
+	kubectl apply -k $(NATS_KEDA_BASE_DIR)
+	kubectl rollout status statefulset/nats -n nats-jetstream-keda --timeout=180s
+	kubectl rollout status deployment/orders-worker -n nats-jetstream-keda --timeout=180s
+
+nats-keda-bootstrap:
+	kubectl delete job nats-jetstream-bootstrap -n nats-jetstream-keda --ignore-not-found=true
+	kubectl apply -f labs/nats-jetstream-keda/jobs/bootstrap.yaml
+	kubectl wait --for=condition=complete job/nats-jetstream-bootstrap -n nats-jetstream-keda --timeout=180s
+
+nats-keda-publish:
+	kubectl delete job nats-orders-publisher -n nats-jetstream-keda --ignore-not-found=true
+	kubectl apply -f labs/nats-jetstream-keda/jobs/publish.yaml
+
+nats-keda-status:
+	kubectl get pods -n nats-jetstream-keda -o wide
+	kubectl get scaledobject,hpa -n nats-jetstream-keda
+	kubectl get jobs -n nats-jetstream-keda
+
+nats-keda-verify:
+	./labs/nats-jetstream-keda/tests/verify.sh
+
+nats-keda-delete:
+	kubectl delete namespace nats-jetstream-keda --ignore-not-found=true
+
+nats-keda-up: nats-keda-preflight keda-install nats-keda-apply nats-keda-bootstrap
+
+nats-keda-down: nats-keda-delete keda-uninstall

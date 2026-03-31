@@ -1,0 +1,13 @@
+apiVersion: keda.sh/v1alpha1
+kind: TriggerAuthentication
+metadata:
+  name: nats-jetstream-trigger-auth
+  namespace: nats-jetstream-keda
+spec:
+  secretTargetRef:
+    - parameter: natsServerMonitoringEndpoint
+      name: keda-jetstream-trigger
+      key: endpoint
+    - parameter: account
+      name: keda-jetstream-trigger
+      key: account

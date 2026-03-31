@@ -1,0 +1,13 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - namespace.yaml
+  - nats-client-secret.yaml
+  - keda-trigger-secret.yaml
+  - nats-configmap.yaml
+  - nats-service.yaml
+  - nats-statefulset.yaml
+  - orders-worker-deployment.yaml
+  - keda-trigger-auth.yaml
+  - orders-worker-scaledobject.yaml

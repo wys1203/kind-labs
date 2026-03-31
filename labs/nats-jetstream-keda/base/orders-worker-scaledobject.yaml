@@ -1,0 +1,22 @@
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: orders-worker
+  namespace: nats-jetstream-keda
+spec:
+  pollingInterval: 5
+  cooldownPeriod: 30
+  minReplicaCount: 0
+  maxReplicaCount: 10
+  scaleTargetRef:
+    name: orders-worker
+  triggers:
+    - type: nats-jetstream
+      authenticationRef:
+        name: nats-jetstream-trigger-auth
+      metadata:
+        stream: ORDERS
+        consumer: orders-worker
+        lagThreshold: "5"
+        activationLagThreshold: "1"
+        useHttps: "false"

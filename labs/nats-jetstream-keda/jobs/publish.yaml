@@ -1,0 +1,25 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: nats-orders-publisher
+  namespace: nats-jetstream-keda
+spec:
+  backoffLimit: 1
+  template:
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: publisher
+          image: natsio/nats-box:latest
+          command:
+            - /bin/sh
+            - -ec
+            - |
+              for i in $(seq 1 50); do
+                nats --server "$NATS_URL" --user "$NATS_USER" --password "$NATS_PASSWORD" \
+                  pub orders.created "order-$i"
+                sleep 0.2
+              done
+          envFrom:
+            - secretRef:
+                name: nats-client-credentials

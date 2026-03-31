@@ -1,0 +1,34 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: orders-worker
+  namespace: nats-jetstream-keda
+spec:
+  replicas: 0
+  selector:
+    matchLabels:
+      app: orders-worker
+  template:
+    metadata:
+      labels:
+        app: orders-worker
+    spec:
+      containers:
+        - name: worker
+          image: natsio/nats-box:latest
+          command:
+            - /bin/sh
+            - -ec
+            - |
+              echo "orders-worker started"
+              while true; do
+                nats --server "$NATS_URL" --user "$NATS_USER" --password "$NATS_PASSWORD" \
+                  consumer next ORDERS orders-worker --count 1 --ack --wait 30s || true
+                sleep "${PROCESSING_DELAY_SECONDS:-15}"
+              done
+          envFrom:
+            - secretRef:
+                name: nats-client-credentials
+          env:
+            - name: PROCESSING_DELAY_SECONDS
+              value: "15"
